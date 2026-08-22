@@ -41,6 +41,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from proyecto.ml.constants import (
     DYNAMIC_CLASS_NAMES,
     DYNAMIC_MODEL_MIN_BYTES,
+    DYNAMIC_PREDICTION_THRESHOLD,
     DYNAMIC_MODEL_PATH,
 )
 from proyecto.ml.sequence_inference import predict_sequence
@@ -369,10 +370,12 @@ def sequence_predict(request):
         class_index, confidence = predict_sequence(model, frames)
         if class_index >= len(DYNAMIC_CLASS_NAMES):
             raise ValueError('La salida del modelo no coincide con sus clases.')
+        accepted = confidence >= DYNAMIC_PREDICTION_THRESHOLD
         return JsonResponse({
-            'predicted': DYNAMIC_CLASS_NAMES[class_index],
+            'predicted': DYNAMIC_CLASS_NAMES[class_index] if accepted else 'no_reconocida',
             'confidence': f'{confidence:.2f}',
             'class_index': class_index,
+            'accepted': accepted,
         })
     except (UnicodeDecodeError, ValueError, TypeError) as exc:
         return JsonResponse({'error': str(exc)}, status=400)

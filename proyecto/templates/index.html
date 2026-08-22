@@ -265,7 +265,9 @@
         let finishWordTimer = null;        // Timer para pronunciar palabra tras pausa
         let currentSegment = '';           // Segmento de palabra actual (sin espacios)
         let dynamicFrames = [];             // Ventana de landmarks para señas dinamicas
+        let dynamicPredictionHistory = []; // Filtra resultados aislados del modelo temporal
         const dynamicModelReady = {{ dynamic_model_ready|yesno:"true,false" }};
+        const dynamicMinStablePredictions = 2;
 
         // --- Configuración de sensibilidad ---
         // 1 = Precisa (alta confianza, lento, 3 confirmaciones)
@@ -379,7 +381,24 @@
             });
             if (!response.ok) return;
             const result = await response.json();
-            dynamicOutput.textContent = `${result.predicted} (${result.confidence})`;
+            if (!result.accepted || result.predicted === 'no_reconocida') {
+                dynamicPredictionHistory = [];
+                dynamicOutput.textContent = 'Sin suficiente confianza';
+                return;
+            }
+
+            dynamicPredictionHistory.push(result.predicted);
+            if (dynamicPredictionHistory.length > 4) {
+                dynamicPredictionHistory.shift();
+            }
+            const stableCount = dynamicPredictionHistory.filter(
+                prediction => prediction === result.predicted,
+            ).length;
+            if (stableCount >= dynamicMinStablePredictions) {
+                dynamicOutput.textContent = `${result.predicted} (${result.confidence})`;
+            } else {
+                dynamicOutput.textContent = 'Analizando...';
+            }
         }
 
         // --- Resolver acción del cliente según confianza y preset ---
@@ -468,6 +487,7 @@
             lastCommittedAt = now;
             resetPredictionStability();
             dynamicFrames = [];
+            dynamicPredictionHistory = [];
         }
 
         // --- Comprometer predicción: agregar letra, espacio o borrar ---
