@@ -1,0 +1,30 @@
+# ==============================================================================
+# Dependencias del proyecto Señas Al Aire
+# ==============================================================================
+# django:          Framework web
+# tensorflow:      Red neuronal CNN (MobileNetV2) y MLP
+# mediapipe:       Detección de manos y extracción de landmarks
+# kagglehub:       Descarga del dataset ASL Alphabet desde Kaggle
+# whitenoise:      Servir archivos estáticos en producción
+# gunicorn/uvicorn: Servidor ASGI para despliegue en Render
+# dj-database-url:  Configuración de BD por variable de entorno
+# psycopg2-binary:  Conexión a PostgreSQL en producción
+# matplotlib:      Generación de gráficas de resultados
+# scikit-learn:    Métricas de evaluación (matriz de confusión)
+# ==============================================================================
+
+django==4.1
+dj-database-url>=2.2,<3
+gunicorn>=23,<24
+kagglehub>=0.3,<2
+matplotlib>=3.8,<4
+mediapipe>=0.10.33,<0.11
+numpy>=1.26,<3
+pillow>=10,<12
+psycopg2-binary>=2.9,<3
+scikit-learn>=1.3,<2
+tensorflow>=2.16,<2.22; python_version >= "3.10" and python_version < "3.14"
+uvicorn>=0.34,<1
+whitenoise>=6.9,<7
+yt-dlp>=2026.1,<2027
+

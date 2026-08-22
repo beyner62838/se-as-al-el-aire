@@ -1,0 +1,23 @@
+# Entornos y cachés
+.venv/
+.venv-test/
+.venv312/
+myenv/
+__pycache__/
+*.py[cod]
+*.log
+
+# Datos y archivos generados
+data/
+proyecto/datasets/
+proyecto/.cache/
+staticfiles/
+proyecto/static/images/*
+!proyecto/static/images/.gitkeep
+
+# Base de datos local
+db.sqlite3
+
+# Archivos de herramientas
+.vscode/
+.env

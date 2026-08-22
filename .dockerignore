@@ -1,0 +1,14 @@
+.git
+.venv
+.venv-test
+.venv312
+myenv
+__pycache__
+*.py[cod]
+*.log
+db.sqlite3
+staticfiles
+proyecto/datasets
+proyecto/.cache
+proyecto/models/asl_landmarks_dataset_v1.npz
+data/

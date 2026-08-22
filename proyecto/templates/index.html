@@ -1,0 +1,628 @@
+﻿<!-- ================================================================== -->
+<!-- INTERFAZ DE USUARIO - SEÑAS AL AIRE                          -->
+<!-- Reconocimiento de lenguaje de señas ASL                      -->
+<!-- ================================================================== -->
+
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reconocimiento de Gestos</title>
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+</head>
+<body>
+    <div class="page-shell">
+
+        <!-- ================================================================ -->
+        <!-- CABECERA: Título, descripción y estado del sistema               -->
+        <!-- ================================================================ -->
+        <header class="hero">
+            <div class="hero-copy">
+                <h1>Traductor ASL con Cámara</h1>
+                <p>Reconocimiento hibrido con landmarks de MediaPipe y modelo visual entrenado con el dataset <strong>{{ dataset_name }}</strong> de Kaggle.</p>
+
+                <!-- Chips de estado: dataset, CNN, landmarks, híbrido -->
+                <div class="status-chips">
+                    {% if training_enabled %}
+                        <span class="status-chip {% if dataset_ready %}is-ready{% else %}is-pending{% endif %}">
+                            Dataset {% if dataset_ready %}listo{% else %}pendiente{% endif %}
+                        </span>
+                    {% else %}
+                        <span class="status-chip is-info">
+                            Modo despliegue
+                        </span>
+                    {% endif %}
+                    <span class="status-chip {% if image_model_ready %}is-ready{% else %}is-pending{% endif %}">
+                        CNN {% if image_model_ready %}lista{% else %}pendiente{% endif %}
+                    </span>
+                    <span class="status-chip {% if landmark_model_ready %}is-ready{% else %}is-pending{% endif %}">
+                        Landmarks {% if landmark_model_ready %}listos{% else %}pendientes{% endif %}
+                    </span>
+                    <span class="status-chip {% if model_ready %}is-ready{% else %}is-pending{% endif %}">
+                        Hibrido {% if model_ready %}listo{% else %}sin entrenar{% endif %}
+                    </span>
+                    <span class="status-chip is-info">
+                        {{ dataset_classes }} clases / {{ dataset_total_images }} imágenes
+                    </span>
+                </div>
+            </div>
+
+            <!-- Botón de entrenamiento/evaluación (solo en modo local) -->
+            <div class="hero-actions">
+                {% if training_enabled %}
+                    <form action="{% url 'prediccion' %}" method="post">
+                        {% csrf_token %}
+                        <button class="primary-button" type="submit">Entrenar o evaluar modelo</button>
+                    </form>
+                {% else %}
+                    <p>En Render esta version queda solo para prediccion en camara.</p>
+                {% endif %}
+            </div>
+        </header>
+
+        <!-- ================================================================ -->
+        <!-- MENSAJES FLASH: estado y errores                                 -->
+        <!-- ================================================================ -->
+
+        {% if status_message %}
+            <section class="flash-message flash-success">
+                {{ status_message }}
+            </section>
+        {% endif %}
+
+        {% if error_message %}
+            <section class="flash-message flash-error">
+                {{ error_message }}
+            </section>
+        {% endif %}
+
+        <!-- ================================================================ -->
+        <!-- PANEL DE CÁMARA: captura en vivo y reconocimiento                -->
+        <!-- ================================================================ -->
+        <section class="camera-panel">
+
+            <!-- Video y controles -->
+            <div class="camera-box">
+                <div class="video-stage">
+                    <video id="camera" autoplay playsinline></video>
+                    <!-- Guía visual: rectángulo donde colocar la mano -->
+                    <div class="camera-guide"></div>
+                </div>
+                <canvas id="captureCanvas" width="224" height="224" hidden></canvas>
+                <p class="camera-hint">
+                    Manten la mano dentro del recuadro. Al abrir la camara el reconocimiento empieza automaticamente, extrae landmarks de dedos y palma, y luego combina ese resultado con la CNN.
+                </p>
+                <div class="camera-actions">
+                    <button class="secondary-button" id="startCamera" type="button">Abrir cámara</button>
+                    <button class="secondary-button" id="stopCamera" type="button" disabled>Detener cámara</button>
+                    <button class="primary-button" id="captureButton" type="button" disabled>Captura manual</button>
+                    <button class="secondary-button" id="clearWordButton" type="button">Borrar palabra</button>
+                </div>
+
+                <!-- Control de sensibilidad (Precisa/Normal/Rápida) -->
+                <div class="sensitivity-panel">
+                    <label class="sensitivity-label" for="sensitivityControl">Sensibilidad</label>
+                    <input id="sensitivityControl" type="range" min="1" max="3" step="1" value="2">
+                    <span id="sensitivityValue">Normal</span>
+                </div>
+            </div>
+
+            <!-- Panel de salida: letra, palabra, confianza, mano, estado -->
+            <div class="camera-output">
+                <div><strong>Letra:</strong> <span id="letterOutput">-</span></div>
+                <div><strong>Seña dinámica:</strong> <span id="dynamicOutput">-</span></div>
+                <div><strong>Palabra:</strong> <span id="wordOutput">-</span></div>
+                <div><strong>Confianza:</strong> <span id="confidenceOutput">-</span></div>
+                <div><strong>Mano:</strong> <span id="handOutput">-</span></div>
+                <div><strong>Estado:</strong> <span id="recognitionStatus">En espera</span></div>
+            </div>
+        </section>
+
+        <!-- ================================================================ -->
+        <!-- RESULTADOS DE EVALUACIÓN: accuracy, loss, muestras               -->
+        <!-- ================================================================ -->
+        {% if accuracy and loss %}
+            <section class="results-summary">
+                <div class="summary-card">
+                    <span>Accuracy</span>
+                    <strong>{{ accuracy }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Loss</span>
+                    <strong>{{ loss }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Muestras de validación</span>
+                    <strong>{{ sample_count }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Muestras de entrenamiento</span>
+                    <strong>{{ train_count }}</strong>
+                </div>
+            </section>
+        {% endif %}
+
+        <!-- ================================================================ -->
+        <!-- GRÁFICAS DE RESULTADOS (3 gráficas matplotlib)                   -->
+        <!-- ================================================================ -->
+        {% if graph_confusion_matrix %}
+            <section class="graphs-section">
+                <h2 class="graphs-title">Resultados del modelo híbrido</h2>
+                <div class="graphs-grid">
+                    <div class="graph-card">
+                        <h3>Matriz de confusión</h3>
+                        <img src="{% static graph_confusion_matrix %}" alt="Matriz de confusión">
+                    </div>
+                    <div class="graph-card">
+                        <h3>Precisión por clase</h3>
+                        <img src="{% static graph_per_class_accuracy %}" alt="Precisión por clase">
+                    </div>
+                    <div class="graph-card">
+                        <h3>Distribución de confianza</h3>
+                        <img src="{% static graph_confidence_distribution %}" alt="Distribución de confianza">
+                    </div>
+                </div>
+            </section>
+        {% endif %}
+
+        <!-- ================================================================ -->
+        <!-- SECUENCIA PREDICHA vs REAL                                       -->
+        <!-- ================================================================ -->
+        {% if predicted_word %}
+            <section class="word-summary">
+                <div class="summary-card">
+                    <span>Secuencia predicha</span>
+                    <strong>{{ predicted_word }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Secuencia real</span>
+                    <strong>{{ actual_word }}</strong>
+                </div>
+            </section>
+        {% endif %}
+
+        <!-- ================================================================ -->
+        <!-- CUADRÍCULA DE PREDICCIONES de ejemplo                            -->
+        <!-- ================================================================ -->
+        {% if results %}
+            <section class="flash-message">
+                Se muestran {{ preview_count }} ejemplos variados tomados de distintas clases del dataset para inspección visual.
+            </section>
+            <section class="predictions-grid">
+                {% for fila in results %}
+                    <article class="prediction-card">
+                        <img src="{{ fila.image }}" alt="Ejemplo de gesto {{ fila.id }}">
+                        <div class="prediction-details">
+                            <div><strong>ID:</strong> {{ fila.id }}</div>
+                            <div><strong>Real:</strong> {{ fila.actual }}</div>
+                            <div><strong>Predicho:</strong> {{ fila.predicted }}</div>
+                            <div><strong>Confianza:</strong> {{ fila.confidence }}</div>
+                        </div>
+                    </article>
+                {% endfor %}
+            </section>
+        {% else %}
+            <section class="empty-state">
+                {% if training_enabled %}
+                    <p>Presiona el botón para descargar el dataset grande si hace falta, entrenar el modelo y ver predicciones reales del nuevo clasificador.</p>
+                {% else %}
+                    <p>El despliegue usa modelos ya entrenados. Abre la camara para empezar a reconocer señas.</p>
+                {% endif %}
+            </section>
+        {% endif %}
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- LÓGICA DEL CLIENTE                                              -->
+    <!-- Captura de frames, predicción vía API, construcción de palabras, -->
+    <!-- síntesis de voz, control de sensibilidad.                       -->
+    <!-- ================================================================ -->
+    <script>
+        // --- Utilidad: obtener cookie CSRF de Django ---
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        // --- Referencias a elementos del DOM ---
+        const video = document.getElementById('camera');
+        const canvas = document.getElementById('captureCanvas');
+        const ctx = canvas.getContext('2d');
+        const startCamera = document.getElementById('startCamera');
+        const stopCamera = document.getElementById('stopCamera');
+        const captureButton = document.getElementById('captureButton');
+        const clearWordButton = document.getElementById('clearWordButton');
+        const letterOutput = document.getElementById('letterOutput');
+        const dynamicOutput = document.getElementById('dynamicOutput');
+        const wordOutput = document.getElementById('wordOutput');
+        const confidenceOutput = document.getElementById('confidenceOutput');
+        const handOutput = document.getElementById('handOutput');
+        const recognitionStatus = document.getElementById('recognitionStatus');
+        const sensitivityControl = document.getElementById('sensitivityControl');
+        const sensitivityValue = document.getElementById('sensitivityValue');
+
+        // --- Estado global ---
+        let currentWord = '';              // Palabra completa que se está formando
+        let stream = null;                 // Stream de la cámara
+        let recognitionInterval = null;    // Intervalo de captura automática
+        let recognitionInFlight = false;   // Evita múltiples peticiones simultáneas
+        let stablePredictionKey = '';      // Última predicción estable (para contar repeticiones)
+        let stablePredictionCount = 0;     // Veces consecutivas que se repite la predicción
+        let lastCommittedKey = '';         // Última predicción comprometida
+        let lastCommittedAt = 0;           // Timestamp de la última predicción comprometida
+        let finishWordTimer = null;        // Timer para pronunciar palabra tras pausa
+        let currentSegment = '';           // Segmento de palabra actual (sin espacios)
+        let dynamicFrames = [];             // Ventana de landmarks para señas dinamicas
+        const dynamicModelReady = {{ dynamic_model_ready|yesno:"true,false" }};
+
+        // --- Configuración de sensibilidad ---
+        // 1 = Precisa (alta confianza, lento, 3 confirmaciones)
+        // 2 = Normal (balanceado)
+        // 3 = Rápida (baja confianza, rápido, 1 confirmación)
+        const sensitivityPresets = {
+            1: {
+                label: 'Precisa',
+                minConfidence: 0.82,
+                intervalMs: 1000,
+                requiredStablePredictions: 3,
+            },
+            2: {
+                label: 'Normal',
+                minConfidence: 0.72,
+                intervalMs: 820,
+                requiredStablePredictions: 2,
+            },
+            3: {
+                label: 'Rápida',
+                minConfidence: 0.60,
+                intervalMs: 620,
+                requiredStablePredictions: 1,
+            },
+        };
+        const commitCooldownMs = 1200;     // Tiempo mínimo entre compromisos (misma letra)
+        const finishWordDelayMs = 3200;    // Pausa antes de pronunciar la palabra
+        const csrftoken = getCookie('csrftoken');
+
+        // --- Obtener preset activo según el slider ---
+        function getCurrentPreset() {
+            return sensitivityPresets[sensitivityControl.value] || sensitivityPresets[2];
+        }
+
+        // --- Actualizar etiqueta del slider de sensibilidad ---
+        function updateSensitivityLabel() {
+            sensitivityValue.textContent = getCurrentPreset().label;
+        }
+
+        // --- Actualizar texto de estado ---
+        function updateRecognitionStatus(text) {
+            recognitionStatus.textContent = text;
+        }
+
+        // --- Capturar frame de la cámara y enviar al servidor ---
+        // Toma un recorte cuadrado del centro del video (68% del área),
+        // lo envía como base64 al endpoint /camera_predict/, y procesa la respuesta.
+        async function doCapture() {
+            if (!video.srcObject || recognitionInFlight) return;
+
+            recognitionInFlight = true;
+            try {
+                const videoWidth = video.videoWidth || canvas.width;
+                const videoHeight = video.videoHeight || canvas.height;
+                const cropSize = Math.floor(Math.min(videoWidth, videoHeight) * 0.68);
+                const startX = Math.floor((videoWidth - cropSize) / 2);
+                const startY = Math.floor((videoHeight - cropSize) / 2);
+                ctx.drawImage(video, startX, startY, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
+                const imageData = canvas.toDataURL('image/png');
+                const response = await fetch('{% url "camera_predict" %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrftoken,
+                    },
+                    body: JSON.stringify({ image: imageData }),
+                });
+
+                const result = await response.json();
+                if (response.ok) {
+                    if (dynamicModelReady && result.landmarks && result.landmarks.length === 21) {
+                        dynamicFrames.push(result.landmarks);
+                        if (dynamicFrames.length > 32) {
+                            dynamicFrames.shift();
+                        }
+                        if (dynamicFrames.length === 32) {
+                            void predictDynamicSequence();
+                        }
+                    }
+                    // Actualizar interfaz con la predicción
+                    handOutput.textContent = result.hand_detected ? 'Detectada' : 'No detectada';
+                    if (result.hand_detected) {
+                        letterOutput.textContent = result.predicted;
+                        confidenceOutput.textContent = result.confidence;
+                    } else {
+                        letterOutput.textContent = '-';
+                        confidenceOutput.textContent = '-';
+                    }
+                    processPrediction(resolveClientPrediction(result));
+                } else {
+                    letterOutput.textContent = '-';
+                    confidenceOutput.textContent = '-';
+                    handOutput.textContent = '-';
+                    resetPredictionStability();
+                    stopAutomaticRecognition();
+                    alert(result.error || 'Error en la predicción');
+                }
+            } finally {
+                recognitionInFlight = false;
+            }
+        }
+
+        async function predictDynamicSequence() {
+            const response = await fetch('{% url "sequence_predict" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken,
+                },
+                body: JSON.stringify({ frames: dynamicFrames }),
+            });
+            if (!response.ok) return;
+            const result = await response.json();
+            dynamicOutput.textContent = `${result.predicted} (${result.confidence})`;
+        }
+
+        // --- Resolver acción del cliente según confianza y preset ---
+        // Aplica un umbral de confianza adicional del lado del cliente
+        // (independiente del umbral del servidor) para mayor filtrado.
+        function resolveClientPrediction(result) {
+            if (!result.hand_detected) {
+                return {
+                    ...result,
+                    action: 'ignore',
+                    token: '',
+                };
+            }
+
+            const confidence = parseFloat(result.confidence);
+            const preset = getCurrentPreset();
+
+            if (confidence < preset.minConfidence || result.raw_label === 'nothing') {
+                return {
+                    ...result,
+                    action: 'ignore',
+                    token: '',
+                };
+            }
+
+            if (result.raw_label === 'space') {
+                return {
+                    ...result,
+                    action: 'space',
+                    token: ' ',
+                };
+            }
+
+            if (result.raw_label === 'del') {
+                return {
+                    ...result,
+                    action: 'delete',
+                    token: '',
+                };
+            }
+
+            return {
+                ...result,
+                action: 'append',
+                token: result.raw_label,
+            };
+        }
+
+        // --- Procesar predicción con sistema de estabilidad ---
+        // Requiere N predicciones consecutivas iguales antes de
+        // comprometer la letra (evita falsos positivos).
+        function processPrediction(result) {
+            const predictionKey = `${result.action}:${result.raw_label}:${result.token}`;
+            if (result.action === 'ignore') {
+                if (!result.hand_detected) {
+                    updateRecognitionStatus('Mano no detectada en el recuadro');
+                } else {
+                    updateRecognitionStatus('Buscando una seña estable');
+                }
+                resetPredictionStability();
+                return;
+            }
+
+            if (predictionKey === stablePredictionKey) {
+                stablePredictionCount += 1;
+            } else {
+                stablePredictionKey = predictionKey;
+                stablePredictionCount = 1;
+            }
+
+            const preset = getCurrentPreset();
+            if (stablePredictionCount < preset.requiredStablePredictions) {
+                updateRecognitionStatus(`Confirmando seña: ${stablePredictionCount}/${preset.requiredStablePredictions}`);
+                return;
+            }
+
+            // Cooldown: evitar repetir la misma letra muy seguido
+            const now = Date.now();
+            if (predictionKey === lastCommittedKey && now - lastCommittedAt < commitCooldownMs) {
+                updateRecognitionStatus('Esperando una seña nueva');
+                return;
+            }
+
+            commitPrediction(result);
+            lastCommittedKey = predictionKey;
+            lastCommittedAt = now;
+            resetPredictionStability();
+            dynamicFrames = [];
+        }
+
+        // --- Comprometer predicción: agregar letra, espacio o borrar ---
+        function commitPrediction(result) {
+            if (result.action === 'append' && result.token) {
+                currentWord += result.token;
+                currentSegment += result.token;
+                scheduleFinishWordSpeech(false);
+                updateRecognitionStatus(`Letra aceptada: ${result.token}`);
+            } else if (result.action === 'space') {
+                cancelFinishWordSpeech();
+                speakPendingWord(true);
+                if (currentWord && !currentWord.endsWith(' ')) {
+                    currentWord += ' ';
+                }
+                currentSegment = '';
+                updateRecognitionStatus('Espacio detectado y palabra pronunciada');
+            } else if (result.action === 'delete') {
+                currentWord = currentWord.slice(0, -1);
+                if (currentSegment) {
+                    currentSegment = currentSegment.slice(0, -1);
+                }
+                scheduleFinishWordSpeech(false);
+                updateRecognitionStatus('Borrando último carácter');
+            }
+
+            wordOutput.textContent = currentWord || '-';
+        }
+
+        // --- Reiniciar contador de estabilidad ---
+        function resetPredictionStability() {
+            stablePredictionKey = '';
+            stablePredictionCount = 0;
+        }
+
+        // --- Iniciar captura automática periódica ---
+        function startAutomaticRecognition() {
+            stopAutomaticRecognition();
+            updateRecognitionStatus('Reconocimiento automático activo');
+            const preset = getCurrentPreset();
+            recognitionInterval = setInterval(() => {
+                void doCapture();
+            }, preset.intervalMs);
+            void doCapture();
+        }
+
+        // --- Detener captura automática ---
+        function stopAutomaticRecognition() {
+            if (recognitionInterval) {
+                clearInterval(recognitionInterval);
+                recognitionInterval = null;
+            }
+            updateRecognitionStatus('Reconocimiento detenido');
+        }
+
+        // --- Programar pronunciación de la palabra tras pausa ---
+        function scheduleFinishWordSpeech(forceRestart) {
+            cancelFinishWordSpeech();
+            finishWordTimer = setTimeout(() => {
+                speakPendingWord(forceRestart);
+            }, finishWordDelayMs);
+        }
+
+        // --- Cancelar pronunciación programada ---
+        function cancelFinishWordSpeech() {
+            if (finishWordTimer) {
+                clearTimeout(finishWordTimer);
+                finishWordTimer = null;
+            }
+        }
+
+        // --- Pronunciar el segmento de palabra actual ---
+        function speakPendingWord(force = false) {
+            const pendingWord = currentSegment.trim();
+            if (!pendingWord) {
+                return;
+            }
+
+            speakText(pendingWord, force);
+        }
+
+        // --- Evento: abrir cámara ---
+        startCamera.addEventListener('click', async () => {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                captureButton.disabled = false;
+                stopCamera.disabled = false;
+                startCamera.disabled = true;
+                startAutomaticRecognition();
+            } catch (error) {
+                alert('No se pudo acceder a la cámara: ' + error.message);
+            }
+        });
+
+        // --- Evento: detener cámara y pronunciar palabra pendiente ---
+        stopCamera.addEventListener('click', () => {
+            stopAutomaticRecognition();
+            cancelFinishWordSpeech();
+            speakPendingWord(true);
+            if (stream) {
+                const tracks = stream.getTracks();
+                tracks.forEach(track => track.stop());
+                stream = null;
+                video.srcObject = null;
+            }
+            resetPredictionStability();
+            captureButton.disabled = true;
+            stopCamera.disabled = true;
+            startCamera.disabled = false;
+            handOutput.textContent = '-';
+            dynamicOutput.textContent = '-';
+        });
+
+        // --- Evento: captura manual ---
+        captureButton.addEventListener('click', async () => {
+            await doCapture();
+        });
+
+        // --- Evento: borrar palabra completa ---
+        clearWordButton.addEventListener('click', () => {
+            cancelFinishWordSpeech();
+            currentWord = '';
+            currentSegment = '';
+            resetPredictionStability();
+            wordOutput.textContent = '-';
+            letterOutput.textContent = '-';
+            confidenceOutput.textContent = '-';
+            handOutput.textContent = '-';
+            updateRecognitionStatus('Palabra limpiada');
+        });
+
+        // --- Evento: cambio de sensibilidad ---
+        sensitivityControl.addEventListener('input', () => {
+            updateSensitivityLabel();
+            resetPredictionStability();
+            if (stream) {
+                startAutomaticRecognition();
+            }
+        });
+
+        // --- Síntesis de voz con Web Speech API ---
+        function speakText(text, force = false) {
+            if ('speechSynthesis' in window && text.trim()) {
+                if (force) {
+                    speechSynthesis.cancel();
+                }
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'es-CO';
+                speechSynthesis.speak(utterance);
+            }
+        }
+
+        // Inicializar etiqueta de sensibilidad
+        updateSensitivityLabel();
+    </script>
+</body>
+</html>
