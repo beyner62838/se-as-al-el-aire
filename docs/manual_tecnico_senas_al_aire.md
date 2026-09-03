@@ -201,3 +201,23 @@ Antes de cada entrega se debe ejecutar las pruebas de Django, comprobar que los 
 - [ ] Registrar licencias de WLASL y Hugging Face.
 - [ ] Documentar pruebas con personas no incluidas en el entrenamiento.
 - [ ] Incorporar capturas o figuras finales de la interfaz.
+
+## 15. Imagenes puntuales para anexar
+
+Para que el documento sea verificable y no quede cargado de imagenes decorativas, se recomiendan las siguientes evidencias:
+
+| Numero | Imagen que se debe capturar o anexar | Nombre sugerido | Seccion | Pie de figura sugerido |
+|---:|---|---|---:|---|
+| 1 | Pagina principal con la camara activa y una letra reconocida. | `figura_01_interfaz_camara.png` | 6 | Interfaz principal durante el reconocimiento estatico de una seña. |
+| 2 | Respuesta JSON real de `/camera_predict/` en una herramienta de desarrollo. | `figura_02_respuesta_camera_predict.png` | 6.1 | Respuesta de la API con etiqueta, confianza, accion y landmarks. |
+| 3 | Diagrama del flujo completo navegador, Django, MediaPipe y modelos. | `figura_03_arquitectura_general.png` | 4 | Arquitectura general de Señas Al Aire. |
+| 4 | Visualizacion de una mano con sus 21 landmarks. | `figura_04_landmarks_mano.png` | 5.2 | Landmarks tridimensionales detectados por MediaPipe. |
+| 5 | Matriz de confusion del modelo estatico. | `confusion_matrix.png` | 10 | Matriz de confusion generada durante la evaluacion del modelo estatico. |
+| 6 | Precision individual de las clases estaticas. | `per_class_accuracy.png` | 10 | Precision obtenida para cada clase del modelo estatico. |
+| 7 | Distribucion de confianza de aciertos y errores. | `confidence_distribution.png` | 10 | Distribucion de confianza de las predicciones evaluadas. |
+| 8 | Consola con la preparacion de los archivos NPZ. | `figura_08_preparacion_dataset_dinamico.png` | 8 | Preparacion de secuencias dinamicas con 32 frames por ejemplo. |
+| 9 | Diagrama o captura que muestre la forma `(32, 69)` de entrada. | `figura_09_features_temporales.png` | 5.4 | Representacion temporal de postura, trayectoria y velocidad. |
+| 10 | Pantalla con una seña dinamica aceptada y su confianza. | `figura_10_prediccion_dinamica.png` | 6.2 | Resultado de una prediccion dinamica aceptada por el umbral configurado. |
+| 11 | Panel de Render con el servicio desplegado. | `figura_11_estado_despliegue.png` | 11 | Estado del despliegue del servicio web en Render. |
+
+Las imagenes 5, 6 y 7 ya existen en `proyecto/static/images/`. Las imagenes 1, 2, 4, 8, 9, 10 y 11 deben capturarse durante una ejecucion real. La imagen 3 puede elaborarse a partir del diagrama Mermaid de este manual. En cada captura se deben ocultar tokens, claves, cookies, rutas privadas y datos personales.
