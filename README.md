@@ -8,6 +8,8 @@ app_port: 7860
 
 Aplicación web en Django para reconocer señas del alfabeto ASL (American Sign Language) usando la cámara del dispositivo con un sistema híbrido de redes neuronales.
 
+Este documento describe la API, los modelos, la instalación y el despliegue del sistema con una estructura de manual técnico orientada a la entrega académica.
+
 ## Descripción
 
 El sistema combina dos modelos de deep learning para lograr un reconocimiento robusto de las 29 clases del alfabeto ASL (A-Z, del, nothing, space):
@@ -83,6 +85,136 @@ flowchart LR
     E --> F[Letra detectada]
 ```
 
+## API RESTful
+
+La aplicación expone endpoints HTTP mediante Django. Las respuestas se entregan en formato JSON para las operaciones de inferencia. La documentación funcional de los endpoints se mantiene en este README y en [docs/manual_tecnico_senas_al_aire.md](docs/manual_tecnico_senas_al_aire.md). El proyecto no utiliza Swagger UI ni ReDoc porque su servidor actual es Django y no FastAPI.
+
+### `GET /` — Estado de la aplicación
+
+Renderiza la interfaz web principal, entrega la cookie CSRF y muestra si los modelos estáticos y dinámicos están disponibles.
+
+### `POST /camera_predict/` — Reconocer una imagen de cámara
+
+Recibe una imagen codificada en Base64 y retorna la predicción híbrida basada en landmarks y apariencia visual.
+
+**Request body**
+
+```json
+{
+    "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ..."
+}
+```
+
+**Respuesta `200 OK`**
+
+```json
+{
+    "predicted": "A",
+    "raw_label": "a",
+    "confidence": "0.95",
+    "action": "letter",
+    "token": "a",
+    "hand_detected": true,
+    "preprocess_mode": "mediapipe-landmarks",
+    "prediction_mode": "hybrid-landmarks-image",
+    "landmark_label": "a",
+    "landmark_confidence": 0.96,
+    "image_label": "a",
+    "image_confidence": 0.91,
+    "handedness": "Right",
+    "landmarks": []
+}
+```
+
+El campo `landmarks` contiene los puntos detectados cuando la respuesta incluye la información completa de la mano. La respuesta real puede variar según la imagen y la detección obtenida.
+
+**Ejemplo con `curl`**
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8000/camera_predict/ `
+    -H "Content-Type: application/json" `
+    -H "X-CSRFToken: <csrf-token>" `
+    -d '{"image":"data:image/jpeg;base64,<base64-de-la-imagen>"}'
+```
+
+El endpoint limita el tamaño de la solicitud a 2 MB de imagen y aplica un límite de 10 solicitudes por segundo por dirección IP.
+
+### `POST /sequence_predict/` — Reconocer una seña dinámica
+
+Recibe una lista de frames con 21 landmarks tridimensionales por frame. El sistema remuestrea la secuencia a 32 frames, genera 69 características por frame y ejecuta el modelo GRU.
+
+**Request body**
+
+```json
+{
+    "frames": [
+        [
+            [0.0, 0.0, 0.0],
+            [0.1, 0.2, 0.0]
+        ]
+    ]
+}
+```
+
+En una solicitud real, cada frame debe contener los 21 puntos completos de la mano.
+
+**Respuesta `200 OK`**
+
+```json
+{
+    "predicted": "hello",
+    "confidence": "0.87",
+    "class_index": 0,
+    "accepted": true
+}
+```
+
+Cuando la confianza es inferior a `0.75`, la respuesta conserva el índice y la confianza, pero devuelve `"predicted": "no_reconocida"` y `"accepted": false`.
+
+### `POST /prediccion/` — Entrenar o evaluar modelos
+
+Ejecuta el flujo local de descarga de datos, entrenamiento y evaluación del modelo estático cuando `ALLOW_TRAINING=true`. En producción se encuentra deshabilitado y muestra un mensaje informativo en la interfaz.
+
+## Manejo de errores
+
+Las respuestas de error de los endpoints mantienen un formato JSON sencillo con el campo `error`:
+
+```json
+{
+    "error": "El contenido debe ser JSON."
+}
+```
+
+| Código | Causa |
+|---:|---|
+| `400` | JSON inválido, imagen ausente, frames vacíos o landmarks con formato incorrecto. |
+| `405` | Método HTTP diferente de `POST` en un endpoint de inferencia. |
+| `413` | Solicitud de imagen superior al tamaño permitido. |
+| `415` | El contenido no usa `application/json`. |
+| `429` | Se superó el límite de solicitudes del endpoint de cámara. |
+| `500` | Error interno durante la inferencia. |
+| `503` | El modelo dinámico todavía no existe o no cumple el tamaño mínimo. |
+
+## Modelo de Machine Learning
+
+El sistema utiliza tres componentes de aprendizaje automático:
+
+| Componente | Modelo | Entrada | Salida |
+|---|---|---|---|
+| Clasificador visual | MobileNetV2 con transfer learning | Recorte RGB de la mano a 96×96 | 29 clases estáticas |
+| Clasificador geométrico | MLP de landmarks | 63 valores `(21 × 3)` | 29 clases estáticas |
+| Clasificador temporal | GRU | 32 frames × 69 características | 10 señas dinámicas |
+
+La predicción estática se calcula mediante la combinación:
+
+```text
+prediccion_final = 0.78 × prediccion_landmarks + 0.22 × prediccion_imagen
+```
+
+Las clases dinámicas son `hello`, `thank_you`, `sorry`, `help`, `please`, `yes`, `no`, `water`, `good` y `bad`.
+
+El modelo dinámico se entrena con los preparadores de WLASL y Hugging Face y se guarda como `proyecto/models/asl_dynamic_gru.keras`. Su artefacto actual es experimental: requiere más muestras, varios signantes y una validación independiente por persona antes de presentarse como un resultado generalizable.
+
 ## Requisitos
 
 - **Windows 10 o superior** (o Linux con dependencias OpenGL).
@@ -93,8 +225,8 @@ flowchart LR
 ## Instalación y ejecución local
 
 ```powershell
-git clone https://github.com/camiloGoca/Se-as-Al-Aire.git
-cd Se-as-Al-Aire
+git clone https://github.com/beyner62838/se-as-al-el-aire.git
+cd se-as-al-el-aire
 
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -202,8 +334,16 @@ django_deep_learning/
 │   │   ├── asl_alphabet_class_names.json
 │   │   ├── asl_landmarks_mlp.keras
 │   │   ├── asl_landmarks_metadata.json
-│   │   ├── asl_landmarks_dataset_v1.npz
+│   │   ├── asl_dynamic_gru.keras
+│   │   ├── asl_dynamic_class_names.json
 │   │   └── hand_landmarker.task
+│   ├── ml/                       # Preparación, entrenamiento e inferencia ML
+│   │   ├── sequence_dataset.py
+│   │   ├── sequence_inference.py
+│   │   ├── temporal_model.py
+│   │   ├── prepare_wlasl.py
+│   │   ├── prepare_hf_video_dataset.py
+│   │   └── train_dynamic.py
 │   ├── templates/
 │   │   └── index.html            # Interfaz de usuario
 │   ├── static/
@@ -224,6 +364,8 @@ En Render la app solo se usa para inferencia. El entrenamiento y la evaluación 
 - `proyecto/models/asl_alphabet_class_names.json`
 - `proyecto/models/asl_landmarks_mlp.keras`
 - `proyecto/models/asl_landmarks_metadata.json`
+- `proyecto/models/asl_dynamic_gru.keras`
+- `proyecto/models/asl_dynamic_class_names.json`
 - `proyecto/models/hand_landmarker.task`
 
 ### Ignorados (regenerables o pesados)
