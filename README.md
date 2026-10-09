@@ -6,9 +6,15 @@ app_port: 7860
 
 # Señas Al Aire
 
-Aplicación web en Django para reconocer señas del alfabeto ASL (American Sign Language) usando la cámara del dispositivo con un sistema híbrido de redes neuronales.
+Aplicación web en Django para clasificar posturas del alfabeto ASL (American Sign Language) con la cámara del dispositivo mediante un sistema híbrido de redes neuronales. La salida es experimental y no representa una medición general de precisión.
 
 Este documento describe la API, los modelos, la instalación y el despliegue del sistema con una estructura de manual técnico orientada a la entrega académica.
+
+## Documentación técnica
+
+- [Manual técnico en Word, basado en la plantilla GradeBoost-API](docs/manual_tecnico_senas_al_aire.docx)
+- [Manual técnico en Markdown](docs/manual_tecnico_senas_al_aire.md)
+- [Repositorio de referencia GradeBoost-API](https://github.com/jose-llanos/GradeBoost-API)
 
 ## Descripción
 
@@ -87,7 +93,7 @@ flowchart LR
 
 ## API RESTful
 
-La aplicación expone endpoints HTTP mediante Django. Las respuestas se entregan en formato JSON para las operaciones de inferencia. La documentación funcional de los endpoints se mantiene en este README y en [docs/manual_tecnico_senas_al_aire.md](docs/manual_tecnico_senas_al_aire.md). El proyecto no utiliza Swagger UI ni ReDoc porque su servidor actual es Django y no FastAPI.
+La aplicación expone rutas HTTP mediante Django. Las respuestas de inferencia se entregan en JSON; la página principal y `/prediccion/` renderizan HTML. La referencia completa está en este README y en los manuales [Word](docs/manual_tecnico_senas_al_aire.docx) y [Markdown](docs/manual_tecnico_senas_al_aire.md). No se genera Swagger UI, ReDoc ni un esquema OpenAPI. Las solicitudes POST están protegidas por CSRF: primero solicita `GET /` para obtener la cookie `csrftoken` y envíala junto con el encabezado `X-CSRFToken`.
 
 ### `GET /` — Estado de la aplicación
 
@@ -131,13 +137,16 @@ El campo `landmarks` contiene los puntos detectados cuando la respuesta incluye 
 **Ejemplo con `curl`**
 
 ```powershell
+curl.exe -c cookies.txt http://127.0.0.1:8000/
+
 curl.exe -X POST http://127.0.0.1:8000/camera_predict/ `
+    -b cookies.txt `
     -H "Content-Type: application/json" `
     -H "X-CSRFToken: <csrf-token>" `
     -d '{"image":"data:image/jpeg;base64,<base64-de-la-imagen>"}'
 ```
 
-El endpoint limita el tamaño de la solicitud a 2 MB de imagen y aplica un límite de 10 solicitudes por segundo por dirección IP.
+El endpoint limita la imagen decodificada a 2 MiB y a 2.000.000 píxeles; además, rechaza cuerpos de solicitud mayores de 4 MiB. El límite de frecuencia configurado es de 10 solicitudes por segundo y dirección IP mediante la caché de Django. Una solicitud rechazada por CSRF devuelve `403`.
 
 ### `POST /sequence_predict/` — Reconocer una seña dinámica
 
@@ -149,14 +158,19 @@ Recibe una lista de frames con 21 landmarks tridimensionales por frame. El siste
 {
     "frames": [
         [
-            [0.0, 0.0, 0.0],
-            [0.1, 0.2, 0.0]
+            [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
         ]
     ]
 }
 ```
 
-En una solicitud real, cada frame debe contener los 21 puntos completos de la mano.
+El ejemplo usa valores cero solo para mostrar la forma del JSON; no representa una seña real ni una predicción útil. Cada frame real debe contener los 21 puntos detectados.
 
 **Respuesta `200 OK`**
 
@@ -188,8 +202,9 @@ Las respuestas de error de los endpoints mantienen un formato JSON sencillo con 
 | Código | Causa |
 |---:|---|
 | `400` | JSON inválido, imagen ausente, frames vacíos o landmarks con formato incorrecto. |
+| `403` | Solicitud POST rechazada por la protección CSRF de Django. |
 | `405` | Método HTTP diferente de `POST` en un endpoint de inferencia. |
-| `413` | Solicitud de imagen superior al tamaño permitido. |
+| `413` | Cuerpo de cámara superior a 4 MiB, imagen decodificada superior a 2 MiB o resolución mayor a 2.000.000 píxeles. |
 | `415` | El contenido no usa `application/json`. |
 | `429` | Se superó el límite de solicitudes del endpoint de cámara. |
 | `500` | Error interno durante la inferencia. |
@@ -202,7 +217,7 @@ El sistema utiliza tres componentes de aprendizaje automático:
 | Componente | Modelo | Entrada | Salida |
 |---|---|---|---|
 | Clasificador visual | MobileNetV2 con transfer learning | Recorte RGB de la mano a 96×96 | 29 clases estáticas |
-| Clasificador geométrico | MLP de landmarks | 63 valores `(21 × 3)` | 29 clases estáticas |
+| Clasificador geométrico | MLP de landmarks | 63 valores `(21 × 3)` | 28 clases estáticas; excluye `nothing` |
 | Clasificador temporal | GRU | 32 frames × 69 características | 10 señas dinámicas |
 
 La predicción estática se calcula mediante la combinación:
