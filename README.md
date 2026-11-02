@@ -6,23 +6,27 @@ app_port: 7860
 
 # Señas Al Aire
 
-Aplicación web en Django para clasificar posturas del alfabeto ASL (American Sign Language) con la cámara del dispositivo mediante un sistema híbrido de redes neuronales. La salida es experimental y no representa una medición general de precisión.
+Aplicación web en Django para clasificar algunas posturas estáticas del alfabeto ASL (American Sign Language) con la cámara del dispositivo mediante modelos de visión por computador. La salida es experimental y no representa una medición general de precisión ni una traducción universal.
 
 Este documento describe la API, los modelos, la instalación y el despliegue del sistema con una estructura de manual técnico orientada a la entrega académica.
 
-## Documentación técnica
+## Documentación
 
+- [Manual de usuario en Word](docs/manual_usuario_senas_al_aire.docx)
+- [Manual de usuario en Markdown](docs/manual_usuario_senas_al_aire.md)
 - [Manual técnico en Word, basado en la plantilla GradeBoost-API](docs/manual_tecnico_senas_al_aire.docx)
 - [Manual técnico en Markdown](docs/manual_tecnico_senas_al_aire.md)
+- [Carta independiente sobre uso de IA en Word](docs/carta_uso_ia_senas_al_aire.docx)
+- [Carta independiente sobre uso de IA en Markdown](docs/carta_uso_ia_senas_al_aire.md)
 - [Repositorio de referencia GradeBoost-API](https://github.com/jose-llanos/GradeBoost-API)
 
 ## Descripción
 
-El sistema combina dos modelos de deep learning para lograr un reconocimiento robusto de las 29 clases del alfabeto ASL (A-Z, del, nothing, space):
+El sistema usa dos modelos de aprendizaje profundo para clasificar posturas estáticas. El modelo visual tiene 29 etiquetas configuradas (A-Z, `del`, `nothing`, `space`); el MLP de landmarks tiene 28 salidas y no incluye `nothing`. La fusión híbrida también anula `nothing`, por lo que el clasificador estático final puede emitir A-Z, `del` o `space` (28 clases posibles):
 
 1. **CNN MobileNetV2** con transfer learning, entrenada sobre el dataset `grassknoted/asl-alphabet` de Kaggle.
 2. **MLP (perceptrón multicapa)** entrenado sobre landmarks de la mano extraídos con **MediaPipe Hand Landmarker**.
-3. **Sistema híbrido**: combinación ponderada (78% landmarks + 22% CNN) para la predicción final.
+3. **Sistema híbrido**: combinación ponderada (78% landmarks + 22% CNN); `nothing` se excluye de la salida fusionada.
 
 ### Características
 
@@ -51,8 +55,8 @@ python -m proyecto.ml.train_dynamic --input data/dynamic_sequences.npz data/dyna
 ```
 
 El modelo generado se guarda en `proyecto/models/asl_dynamic_gru.keras`.
-Mientras ese archivo no exista, `/sequence_predict/` responde `503` para no
-mostrar predicciones inventadas. El dataset de videos debe descargarse y
+Si el artefacto no existe o no supera el tamaño mínimo configurado,
+`/sequence_predict/` responde `503`. El dataset de videos debe descargarse y
 usarse conforme a su licencia; no debe subirse completo al despliegue.
 
 El primer modelo generado localmente con el piloto de WLASL es experimental:
@@ -66,21 +70,20 @@ del dataset antes de publicar un modelo entrenado con sus videos.
 
 ## Probar la aplicacion desplegada
 
-La version desplegada esta disponible en:
+La dirección configurada para el servicio es:
 
 https://se-as-al-aire-1.onrender.com
 
 Importante:
 
-- Como el servicio esta desplegado en el plan free de Render, si no recibe peticiones por un tiempo se apaga automaticamente.
-- Cuando alguien abra la URL, es posible que tenga que esperar al menos 1 minuto mientras Render recibe la peticion y vuelve a levantar el servicio.
+- En la revisión del 2 de noviembre de 2026 la URL respondió HTTP `503`. No se ha confirmado aquí la causa ni la disponibilidad posterior; verifica el servicio antes de distribuir el enlace como operativo.
 
 ## Arquitectura del sistema
 
 ```mermaid
 flowchart LR
     A[Cámara\nframe] --> B[MediaPipe\nHand Landmarker]
-    B --> C[MLP\n63→256→128→64→29]
+    B --> C[MLP\n63→256→128→64→28]
     C -->|78%| E[Combinación\nponderada]
 
     A --> D1[Crop de\nla mano]
@@ -93,7 +96,7 @@ flowchart LR
 
 ## API RESTful
 
-La aplicación expone rutas HTTP mediante Django. Las respuestas de inferencia se entregan en JSON; la página principal y `/prediccion/` renderizan HTML. La referencia completa está en este README y en los manuales [Word](docs/manual_tecnico_senas_al_aire.docx) y [Markdown](docs/manual_tecnico_senas_al_aire.md). No se genera Swagger UI, ReDoc ni un esquema OpenAPI. Las solicitudes POST están protegidas por CSRF: primero solicita `GET /` para obtener la cookie `csrftoken` y envíala junto con el encabezado `X-CSRFToken`.
+La aplicación expone rutas HTTP mediante Django. Las respuestas de inferencia se entregan en JSON; la interfaz principal y `/prediccion/` renderizan HTML. La documentación está en los manuales [de usuario](docs/manual_usuario_senas_al_aire.md) y [técnico](docs/manual_tecnico_senas_al_aire.md); la declaración sobre el uso de IA está en una [carta separada](docs/carta_uso_ia_senas_al_aire.md). No se genera Swagger UI, ReDoc ni un esquema OpenAPI. Las solicitudes POST están protegidas por CSRF: primero solicita `GET /` para obtener la cookie `csrftoken` y envíala junto con el encabezado `X-CSRFToken`.
 
 ### `GET /` — Estado de la aplicación
 
@@ -116,23 +119,22 @@ Recibe una imagen codificada en Base64 y retorna la predicción híbrida basada 
 ```json
 {
     "predicted": "A",
-    "raw_label": "a",
+    "raw_label": "A",
     "confidence": "0.95",
-    "action": "letter",
-    "token": "a",
+    "action": "append",
+    "token": "A",
     "hand_detected": true,
     "preprocess_mode": "mediapipe-landmarks",
     "prediction_mode": "hybrid-landmarks-image",
-    "landmark_label": "a",
+    "landmark_label": "A",
     "landmark_confidence": 0.96,
-    "image_label": "a",
+    "image_label": "A",
     "image_confidence": 0.91,
-    "handedness": "Right",
-    "landmarks": []
+    "handedness": "Right"
 }
 ```
 
-El campo `landmarks` contiene los puntos detectados cuando la respuesta incluye la información completa de la mano. La respuesta real puede variar según la imagen y la detección obtenida.
+El ejemplo abreviado omite `landmarks`; con una mano detectada, la respuesta real incluye 21 ternas `[x, y, z]`. Las etiquetas usan mayúsculas porque así están definidas en el archivo de clases. `action` puede ser `append`, `space`, `delete` o `ignore`; los valores dependen de la imagen y la confianza.
 
 **Ejemplo con `curl`**
 
@@ -146,11 +148,11 @@ curl.exe -X POST http://127.0.0.1:8000/camera_predict/ `
     -d '{"image":"data:image/jpeg;base64,<base64-de-la-imagen>"}'
 ```
 
-El endpoint limita la imagen decodificada a 2 MiB y a 2.000.000 píxeles; además, rechaza cuerpos de solicitud mayores de 4 MiB. El límite de frecuencia configurado es de 10 solicitudes por segundo y dirección IP mediante la caché de Django. Una solicitud rechazada por CSRF devuelve `403`.
+El código limita la imagen decodificada a 2 MiB y revisa que no supere 2.000.000 píxeles. Una imagen inválida, excesiva o con resolución mayor devuelve `400`. La vista responde `413` si el cuerpo supera 4 MiB, pero Django 4.1 o el proxy pueden rechazar antes solicitudes mayores que sus límites. El control de frecuencia intenta limitar a 10 solicitudes por segundo según `REMOTE_ADDR` usando la caché configurada; con la caché local predeterminada no es global entre procesos/instancias. Una solicitud rechazada por CSRF devuelve `403`.
 
 ### `POST /sequence_predict/` — Reconocer una seña dinámica
 
-Recibe una lista de frames con 21 landmarks tridimensionales por frame. El sistema remuestrea la secuencia a 32 frames, genera 69 características por frame y ejecuta el modelo GRU.
+Recibe una lista no vacía de frames con 21 landmarks tridimensionales por frame. El sistema remuestrea la secuencia a 32 frames, genera 69 características por frame y ejecuta el modelo GRU. La vista no define un máximo propio de frames ni un limitador de frecuencia para este endpoint; aplican también los límites de Django y del servidor frontal.
 
 **Request body**
 
@@ -187,7 +189,7 @@ Cuando la confianza es inferior a `0.75`, la respuesta conserva el índice y la 
 
 ### `POST /prediccion/` — Entrenar o evaluar modelos
 
-Ejecuta el flujo local de descarga de datos, entrenamiento y evaluación del modelo estático cuando `ALLOW_TRAINING=true`. En producción se encuentra deshabilitado y muestra un mensaje informativo en la interfaz.
+Ejecuta la preparación, entrenamiento y evaluación estáticos cuando `TRAINING_ENABLED` está activo. Este indicador toma `ALLOW_TRAINING` y, si se omite, hereda `DEBUG`; `DEBUG` es `true` por defecto. La vista no exige autenticación propia. En producción configura explícitamente `DEBUG=false` y `ALLOW_TRAINING=false`; no presupongas que el código desactiva el entrenamiento automáticamente.
 
 ## Manejo de errores
 
@@ -201,10 +203,10 @@ Las respuestas de error de los endpoints mantienen un formato JSON sencillo con 
 
 | Código | Causa |
 |---:|---|
-| `400` | JSON inválido, imagen ausente, frames vacíos o landmarks con formato incorrecto. |
+| `400` | JSON inválido, imagen ausente/inválida o mayor de 2 MiB, resolución sobre 2.000.000 píxeles, frames vacíos o landmarks inválidos. |
 | `403` | Solicitud POST rechazada por la protección CSRF de Django. |
 | `405` | Método HTTP diferente de `POST` en un endpoint de inferencia. |
-| `413` | Cuerpo de cámara superior a 4 MiB, imagen decodificada superior a 2 MiB o resolución mayor a 2.000.000 píxeles. |
+| `413` | La vista devuelve este código si el cuerpo supera 4 MiB y alcanza la vista. Django o el proxy pueden aplicar límites menores antes. |
 | `415` | El contenido no usa `application/json`. |
 | `429` | Se superó el límite de solicitudes del endpoint de cámara. |
 | `500` | Error interno durante la inferencia. |
@@ -216,7 +218,7 @@ El sistema utiliza tres componentes de aprendizaje automático:
 
 | Componente | Modelo | Entrada | Salida |
 |---|---|---|---|
-| Clasificador visual | MobileNetV2 con transfer learning | Recorte RGB de la mano a 96×96 | 29 clases estáticas |
+| Clasificador visual | MobileNetV2 con transfer learning | Recorte RGB de la mano a 96×96 | 29 etiquetas configuradas; la fusión híbrida excluye `nothing` |
 | Clasificador geométrico | MLP de landmarks | 63 valores `(21 × 3)` | 28 clases estáticas; excluye `nothing` |
 | Clasificador temporal | GRU | 32 frames × 69 características | 10 señas dinámicas |
 
@@ -268,9 +270,9 @@ Abre: http://127.0.0.1:8000/
 
 ### Entrenamiento y evaluación
 
-1. Presiona **"Entrenar o evaluar modelo"** (solo disponible en modo local).
+1. Presiona **"Entrenar o evaluar modelo"** si el indicador `TRAINING_ENABLED` está activo. En el despliegue público recomendado debe permanecer desactivado.
 2. El sistema descarga el dataset ASL Alphabet si es necesario.
-3. Entrena o carga los modelos existentes.
+3. Carga o entrena los modelos existentes según los artefactos disponibles.
 4. Muestra: accuracy, loss, ejemplos de predicción y 3 gráficas de resultados.
 
 ## Gráficas de resultados
@@ -283,7 +285,7 @@ Al presionar "Entrenar o evaluar modelo", el sistema genera automáticamente:
 | **Precisión por clase** | Barras de accuracy por cada letra (verde ≥ 80%, amarillo ≥ 50%, rojo < 50%) |
 | **Distribución de confianza** | Histograma comparativo: confianza en aciertos (verde) vs errores (rojo) |
 
-Las gráficas se generan con matplotlib y se guardan en `proyecto/static/images/`.
+Las gráficas se generan con matplotlib al ejecutar la evaluación y se guardan en `proyecto/static/images/`. Esa carpeta de salida está excluida de Git; no se garantiza que los gráficos estén presentes hasta que se ejecute el flujo de evaluación.
 
 ## Despliegue en Render
 
@@ -373,7 +375,7 @@ django_deep_learning/
 
 ### Versionados (para Render)
 
-En Render la app solo se usa para inferencia. El entrenamiento y la evaluación grande quedan pensados para local, no para producción.
+En una configuración de producción recomendada, la aplicación se usa para inferencia y el entrenamiento se ejecuta localmente. Configura explícitamente `DEBUG=false` y `ALLOW_TRAINING=false`: `DEBUG` es `true` por defecto y el indicador de entrenamiento hereda ese valor cuando `ALLOW_TRAINING` se omite. La vista `/prediccion/` no exige autenticación propia; no dejes el entrenamiento habilitado en un servicio público.
 
 - `proyecto/models/asl_alphabet_mobilenet_v2.keras`
 - `proyecto/models/asl_alphabet_class_names.json`

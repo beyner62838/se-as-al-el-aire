@@ -2,11 +2,11 @@
 ## Señas Al Aire
 
 - **Documento:** manual técnico de la aplicación web y de sus modelos de reconocimiento.
-- **Versión del documento:** 2.0.
-- **Fecha de revisión:** 8 de octubre de 2026.
+- **Versión del documento:** 3.1.
+- **Fecha de revisión:** 2 de noviembre de 2026.
 - **Repositorio:** [beyner62838/se-as-al-el-aire](https://github.com/beyner62838/se-as-al-el-aire).
-- **Base de revisión del código:** rama `main`, commit `80d86e7` (26 de septiembre de 2026).
-- **Plantilla documental:** Manual Técnico GradeBoost-API, secciones 1 a 7.
+- **Base de revisión del código:** rama `main`, commit `eb09d60` (código fuente revisado; los cambios documentales de esta revisión están locales).
+- **Formato base:** Manual Técnico GradeBoost-API, secciones 1 a 7; se añade una sección técnica de riesgos y gobernanza.
 
 ## Introducción
 
@@ -20,7 +20,7 @@ El documento está dirigido a desarrolladores y personas responsables de instala
 
 Señas Al Aire es una aplicación web para reconocimiento asistido de señas de la lengua de señas estadounidense (ASL). La interfaz captura imágenes desde la cámara del navegador y las envía a una aplicación Django. El servidor detecta una mano con MediaPipe y clasifica la imagen mediante una combinación de un modelo de landmarks y un modelo visual. La aplicación también incluye un endpoint para inferencia experimental de secuencias temporales.
 
-El sistema no traduce conversaciones completas ni reconoce de forma general cualquier lengua de señas. La ruta estática cubre las 26 letras del alfabeto ASL y las clases especiales `del`, `nothing` y `space`; la ruta dinámica cubre diez etiquetas configuradas. Los resultados son predicciones del modelo y no sustituyen la interpretación humana ni constituyen una herramienta certificada de comunicación.
+El clasificador visual tiene 29 salidas configuradas (A-Z, `del`, `nothing` y `space`), pero la fusión híbrida anula `nothing`; por tanto, la salida híbrida no reconoce las 29 etiquetas como resultados finales. La ruta dinámica cubre diez etiquetas configuradas. El sistema no traduce conversaciones completas ni reconoce de forma general cualquier lengua de señas. Sus predicciones no sustituyen la interpretación humana ni constituyen una herramienta certificada de comunicación.
 
 ### 1.2. Finalidad del software
 
@@ -48,8 +48,9 @@ La aplicación sigue una arquitectura web cliente-servidor. El navegador adminis
 se-as-al-el-aire/
 ├── manage.py, requirements.txt, Dockerfile, build.sh
 ├── docs/
-│   ├── manual_tecnico_senas_al_aire.md
-│   └── manual_tecnico_senas_al_aire.docx
+│   ├── manual_tecnico_senas_al_aire.md / .docx
+│   ├── manual_usuario_senas_al_aire.md / .docx
+│   └── carta_uso_ia_senas_al_aire.md / .docx
 └── proyecto/
   ├── settings.py, urls.py, views.py, tests.py
   ├── ml/                           # Detección, features, inferencia y entrenamiento
@@ -85,7 +86,7 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-En PowerShell, activa el entorno con `.venv\\Scripts\\Activate.ps1` y ejecuta los mismos comandos de instalación con `python`. La aplicación local queda disponible en `http://127.0.0.1:8000/`. La cámara normalmente requiere un origen seguro: `localhost` es válido para desarrollo; en una instalación remota debe usarse HTTPS.
+En PowerShell, activa el entorno con `.venv\Scripts\Activate.ps1` y ejecuta los mismos comandos de instalación con `python`. La aplicación local queda disponible en `http://127.0.0.1:8000/`. La cámara normalmente requiere un origen seguro: `localhost` es válido para desarrollo; en una instalación remota debe usarse HTTPS.
 
 ### 3.3. Configuración y despliegue
 
@@ -94,18 +95,26 @@ La configuración se controla principalmente mediante variables de entorno:
 | Variable | Uso |
 |---|---|
 | `SECRET_KEY` | Clave secreta de Django. Debe ser privada y configurarse en producción. |
-| `DEBUG` | Activa el modo de depuración. En producción debe ser `false`. |
-| `ALLOW_TRAINING` | Habilita el entrenamiento desde `/prediccion/`. En producción se recomienda `false`. |
+| `DEBUG` | Activa depuración; su valor predeterminado en este proyecto es `true`. En producción debe definirse explícitamente como `false`. |
+| `ALLOW_TRAINING` | Habilita entrenamiento desde `/prediccion/`; si no se define, hereda el valor de `DEBUG`. En producción debe definirse explícitamente como `false`. |
 | `ALLOWED_HOSTS` | Lista de hosts permitidos, separados por comas. |
 | `CSRF_TRUSTED_ORIGINS` | Orígenes HTTPS de confianza para solicitudes protegidas por CSRF. |
 | `DATABASE_URL` | Si está presente, configura la base de datos mediante `dj-database-url`; localmente se usa SQLite. |
 | `PORT` | Puerto de escucha del contenedor; el Dockerfile establece `7860` como valor predeterminado. |
 
-El Dockerfile recoge los estáticos con `collectstatic` y ejecuta Gunicorn con Uvicorn. `build.sh` prepara dependencias y estáticos; las migraciones de producción deben ejecutarse en la fase de release o predeploy cuando la base de datos esté disponible. El README del repositorio describe los parámetros de Render y Hugging Face Spaces. No se deben incluir secretos en Git ni habilitar entrenamiento público sin una evaluación de recursos y controles adicionales.
+El Dockerfile recoge los estáticos con `collectstatic` y ejecuta Gunicorn con Uvicorn. `build.sh` prepara dependencias y estáticos; las migraciones de producción deben ejecutarse en la fase de release o predeploy cuando la base de datos esté disponible. El README del repositorio describe parámetros para Render y Hugging Face Spaces. La configuración no fuerza por sí sola el modo seguro: si se deja `DEBUG` sin definir, `ALLOW_TRAINING` queda habilitado por defecto. La vista `/prediccion/` no exige inicio de sesión propio; antes de desplegar deben configurarse explícitamente `DEBUG=false`, `ALLOW_TRAINING=false`, `SECRET_KEY` y los hosts permitidos. No se deben incluir secretos en Git.
 
 ## 4. Endpoints
 
 Las rutas pertenecen a Django. No se expone Swagger UI, ReDoc ni un esquema OpenAPI generado automáticamente. La página principal es HTML; las predicciones y los errores de las vistas de inferencia se devuelven como JSON.
+
+| Ruta | Método | Resultado |
+|---|---|---|
+| `/` y `/main/` | GET | Interfaz principal y cookie CSRF. |
+| `/prediccion/` | GET/POST | Interfaz; POST entrena/evalúa si `TRAINING_ENABLED` está activo. |
+| `/camera_predict/` | POST | Clasificación estática de una imagen. |
+| `/sequence_predict/` | POST | Clasificación dinámica experimental. |
+| `/admin/` | GET/POST | Panel administrativo estándar de Django, con autenticación de Django. |
 
 ### 4.1. `GET /` y `GET /main/` — Interfaz principal
 
@@ -117,13 +126,13 @@ GET presenta la interfaz. POST ejecuta la preparación, carga o entrenamiento de
 
 ### 4.3. `POST /camera_predict/` — Clasificación de una imagen
 
-Requiere `Content-Type: application/json` y un objeto JSON con la propiedad `image`, que contiene la imagen en Base64 (puede incluir el prefijo `data:image/jpeg;base64,`). El servidor comprueba el método, el tipo de contenido, el tamaño del cuerpo y el límite de frecuencia; después detecta la mano y ejecuta la clasificación híbrida.
+Requiere `Content-Type: application/json` y un objeto JSON con la propiedad `image`, que contiene una imagen en Base64. El cliente de esta interfaz envía un recorte PNG generado en un canvas de 224 × 224 píxeles. La vista comprueba el método, tipo de contenido, tamaño de cuerpo y frecuencia; después detecta la mano y ejecuta la clasificación híbrida.
 
 La respuesta incluye `predicted`, `raw_label`, `confidence`, `action`, `token`, `hand_detected`, `preprocess_mode`, `prediction_mode`, los resultados individuales de landmarks e imagen, `handedness` y `landmarks`. El valor concreto depende de la imagen. Las solicitudes POST deben respetar la protección CSRF de Django y enviar el token correspondiente.
 
 ### 4.4. `POST /sequence_predict/` — Clasificación de una secuencia
 
-Requiere JSON con `frames`, una lista no vacía de frames. Cada frame debe representar 21 landmarks con coordenadas `x`, `y`, `z`; la secuencia se remuestrea a 32 frames antes de formar las características. Si el archivo del modelo dinámico no existe o es menor que el tamaño mínimo configurado, la vista devuelve `503`.
+Requiere JSON con `frames`, una lista no vacía de frames. Cada frame debe representar 21 landmarks con coordenadas `x`, `y`, `z`; la secuencia se remuestrea a 32 frames antes de formar las características. La vista no define límite propio de número de frames ni rate limit; también se aplican los límites generales de Django y del servidor frontal. Si el archivo del modelo dinámico no existe o es menor que el tamaño mínimo configurado, la vista devuelve `503`.
 
 Con un modelo disponible, la respuesta contiene `predicted`, `confidence`, `class_index` y `accepted`. Si la confianza es inferior a `0.75`, `predicted` es `no_reconocida` y `accepted` es `false`. Los POST también están sujetos a la protección CSRF de Django.
 
@@ -143,7 +152,7 @@ probabilidad_final = 0.78 × probabilidad_landmarks
                   + 0.22 × probabilidad_imagen
 ```
 
-El umbral estático de aceptación configurado es `0.72`. Las etiquetas `del`, `nothing` y `space` se traducen en acciones de interfaz. Si no se detecta una mano, la vista no debe interpretarse como una clasificación válida.
+El umbral estático de aceptación configurado es `0.72`. `del` y `space` pueden activar acciones de interfaz. `nothing` existe entre las etiquetas visuales, pero se anula antes de seleccionar el resultado híbrido final. Si no se detecta una mano, la vista no debe interpretarse como una clasificación válida.
 
 ### 5.2. Clasificador dinámico experimental
 
@@ -177,10 +186,10 @@ Las vistas JSON de inferencia devuelven un objeto con la clave `error` para los 
 
 | Código HTTP | Situación documentada |
 |---:|---|
-| `400` | JSON inválido, cuerpo que no sea objeto, imagen ausente, frames vacíos o datos de entrada inválidos. |
+| `400` | JSON inválido, cuerpo que no sea objeto, imagen ausente o inválida, imagen decodificada superior a 2 MiB, resolución superior a 2.000.000 píxeles, frames vacíos o landmarks inválidos. |
 | `403` | Solicitud POST rechazada por la protección CSRF de Django. |
 | `405` | Método diferente de POST en un endpoint de predicción. |
-| `413` | Cuerpo de solicitud de cámara que supera el límite implementado. |
+| `413` | La vista devuelve este código si el cuerpo de cámara supera 4 MiB y la solicitud alcanza ese control. Django o el proxy pueden aplicar límites menores antes; el estado previo depende de su configuración. |
 | `415` | El endpoint de cámara o secuencia no recibe `application/json`. |
 | `429` | Se supera el límite configurado para el endpoint de cámara: diez solicitudes por segundo y dirección IP, usando la caché de Django. |
 | `500` | Excepción inesperada durante la inferencia o salida incompatible del modelo. |
@@ -194,7 +203,7 @@ Ejemplo de error de validación:
 }
 ```
 
-El límite de frecuencia depende del backend de caché configurado; el backend local de Django no sustituye un limitador distribuido cuando se ejecutan varios procesos o instancias. Los detalles internos de excepciones no deben exponerse a usuarios en producción.
+La imagen decodificada se limita a 2 MiB; superar ese tamaño produce `400` en el manejo actual de errores. El código también revisa 2.000.000 píxeles. Django 4.1 tiene un límite de tamaño de solicitud propio que no se sobrescribe en `settings.py`; puede actuar antes del control de 4 MiB de la vista. El límite de frecuencia se basa en `REMOTE_ADDR` y la caché configurada; con la caché local predeterminada no es global entre procesos o instancias. Los detalles internos de excepciones no deben exponerse a usuarios en producción.
 
 ## 7. Ejemplo de uso y verificación
 
@@ -223,8 +232,8 @@ Ejemplo abreviado de respuesta exitosa; los valores son ilustrativos y no una me
   "predicted": "A",
   "raw_label": "A",
   "confidence": "0.95",
-  "action": "letter",
-  "token": "a",
+  "action": "append",
+  "token": "A",
   "hand_detected": true,
   "preprocess_mode": "mediapipe-landmarks",
   "prediction_mode": "hybrid-landmarks-image",
@@ -232,10 +241,11 @@ Ejemplo abreviado de respuesta exitosa; los valores son ilustrativos y no una me
   "landmark_confidence": 0.96,
   "image_label": "A",
   "image_confidence": 0.91,
-  "handedness": "Right",
-  "landmarks": []
+  "handedness": "Right"
 }
 ```
+
+El ejemplo abreviado omite `landmarks`; cuando se detecta una mano, la respuesta real incluye 21 ternas de coordenadas. Las etiquetas se obtienen del JSON versionado y usan mayúsculas para las letras.
 
 ### 7.2. Solicitud dinámica con cURL
 
@@ -287,7 +297,39 @@ El README del repositorio contiene la guía de instalación, uso y despliegue. E
 **Referencias principales:**
 
 - Repositorio del proyecto: <https://github.com/beyner62838/se-as-al-el-aire>
+- Declaración independiente sobre uso de IA: [carta Word](carta_uso_ia_senas_al_aire.docx) y [carta Markdown](carta_uso_ia_senas_al_aire.md).
 - README de GradeBoost-API, consultado como referencia de organización documental: <https://github.com/jose-llanos/GradeBoost-API>
 - Dataset estático: <https://www.kaggle.com/datasets/grassknoted/asl-alphabet>
 - MediaPipe Hand Landmarker: <https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker>
 - Dataset dinámico configurado en Hugging Face: <https://huggingface.co/datasets/ZahidYasinMittha/American-Sign-Language-Dataset>
+
+## 8. Revisión preliminar de vacíos legales y de gobernanza
+
+### 8.1. Alcance y cautela
+
+Esta sección es una identificación técnica preliminar de asuntos que la documentación y el código revisados no resuelven por sí solos. No es concepto jurídico, certificación de cumplimiento ni conclusión de que exista una infracción. La ley aplicable depende, entre otros factores, de quién opera el servicio, dónde están las personas usuarias, qué datos se conservan y qué proveedores reciben información. Antes de un despliegue público o uso con estudiantes se recomienda revisión por asesoría jurídica y por la persona responsable de protección de datos.
+
+### 8.2. Hallazgos y acciones recomendadas
+
+| Prioridad | Asunto pendiente observado | Acción recomendada |
+|---|---|---|
+| Alta | La interfaz envía imágenes al servidor; no se encontró aviso visible, identificación/contacto del responsable o canal para ejercer derechos. | Definir responsable y finalidades; publicar aviso y política; documentar autorización y derechos. Revisar jurídicamente si imágenes y landmarks son datos biométricos sensibles en este contexto. |
+| Alta | No se documentan conservación, borrado ni flujo de imágenes y logs a través del hosting, monitoreo o respaldos. Que la vista no guarde explícitamente una imagen no prueba que ningún proveedor retenga copias. | Mapear sistemas y encargados; revisar contratos, ubicación y transferencias; fijar retención y borrado, minimizar registros e informar sobre terceros. |
+| Alta | Se descargan videos de WLASL y Hugging Face sin inventario local de licencias, permisos, atribución y límites para entrenamiento o redistribución. | Registrar fuente, versión, titular, licencia, consentimiento y usos permitidos. No asumir que un dataset público permite cualquier reutilización o publicación. |
+
+### 8.2.1. Hallazgos y acciones recomendadas (continuación)
+
+| Prioridad | Asunto pendiente observado | Acción recomendada |
+|---|---|---|
+| Media | La interfaz dice “traductor”, pero cubre letras ASL y diez etiquetas experimentales; ASL no es LSC. No se hallaron términos, canal de quejas o aviso accesible de límites. | Describirlo como clasificador experimental ASL. Publicar términos, contacto, límites y aviso de accesibilidad; no presentarlo como interpretación ni comunicación crítica. |
+| Media | Falta una ficha de modelos con evaluación independiente por signante, representación de la población, versiones y usos no permitidos. | Publicar datos/licencias, protocolo, métricas por clase, limitaciones y responsable humano antes de ampliar el uso. |
+| Alta si se dirige a menores | No se identifican controles para uso con menores; la cámara puede captar estudiantes u otras personas. La voz depende de servicios del navegador no descritos por la interfaz. | Revisar autorización y salvaguardas para menores antes de uso educativo; documentar proveedores de voz y ofrecer una alternativa silenciosa. |
+
+### 8.3. Referencias normativas para revisión profesional
+
+- [Ley Estatutaria 1581 de 2012](https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981): régimen colombiano de datos personales; incluye los biométricos como sensibles. Revisar los artículos 5, 6, 9 y 12 y su vigencia. La aplicación concreta requiere análisis jurídico.
+- [Decreto 1377 de 2013](https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=53646): reglas parciales sobre autorización, aviso, políticas, derechos, conservación y transmisión; verificar compilaciones posteriores vigentes.
+- [Ley 23 de 1982](https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=3431): derechos de autor y conexos. Revisar modificaciones y licencias de código, modelos, datos, imágenes y videos.
+- Para el contexto colombiano, identificar con asesoría jurídica el marco vigente sobre derechos de las personas sordas y LSC. No se presenta aquí una fuente normativa específica de LSC como verificada.
+
+El responsable debe verificar la normativa vigente antes de publicar. Estas referencias no certifican cumplimiento ni autorización para publicar datasets o modelos. La declaración de uso de IA del proceso se entrega por separado en la [carta de uso de IA](carta_uso_ia_senas_al_aire.md).
